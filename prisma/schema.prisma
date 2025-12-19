@@ -1,0 +1,54 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  slug        String    @unique
+  description String?
+  color       String    @default("#3B82F6")
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  articles    Article[]
+}
+
+model Article {
+  id          String    @id @default(cuid())
+  title       String
+  slug        String    @unique
+  summary     String
+  content     String
+  imageUrl    String?
+  categoryId  String
+  category    Category  @relation(fields: [categoryId], references: [id])
+  tags        String    // JSON string array
+  published   Boolean   @default(false)
+  featured    Boolean   @default(false)
+  viewCount   Int       @default(0)
+  generatedBy String    @default("ai") // "ai" or "manual"
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([categoryId])
+  @@index([published])
+  @@index([featured])
+}
+
+model Config {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String   // JSON string
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

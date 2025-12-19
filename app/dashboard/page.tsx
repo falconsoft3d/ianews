@@ -1,0 +1,560 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+
+interface Category {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+  color: string
+  active: boolean
+}
+
+interface Article {
+  id: string
+  title: string
+  slug: string
+  summary: string
+  published: boolean
+  featured: boolean
+  viewCount: number
+  categoryId: string
+  createdAt: string
+  category: {
+    name: string
+    color: string
+  }
+}
+
+export default function DashboardPage() {
+  const router = useRouter()
+  const [categories, setCategories] = useState<Category[]>([])
+  const [articles, setArticles] = useState<Article[]>([])
+  const [activeTab, setActiveTab] = useState<'articles' | 'categories' | 'generate' | 'ollama'>('articles')
+  const [loading, setLoading] = useState(false)
+  const [ollamaStatus, setOllamaStatus] = useState<boolean | null>(null)
+  const [ollamaInfo, setOllamaInfo] = useState<any>(null)
+  const [testPrompt, setTestPrompt] = useState('Escribe un párrafo corto sobre tecnología')
+  const [testResponse, setTestResponse] = useState('')
+  const [testLoading, setTestLoading] = useState(false)
+  const [selectedModel, setSelectedModel] = useState('')
+
+  const [newCategory, setNewCategory] = useState({ name: '', description: '', color: '#3B82F6' })
+  const [generateForm, setGenerateForm] = useState({
+    topic: '',
+    categoryId: '',
+    tone: 'informativo',
+  })
+
+  useEffect(() => {
+    loadData()
+    checkOllama()
+    loadOllamaInfo()
+  }, [])
+
+  const loadOllamaInfo = async () => {
+    try {
+      const res = await fetch('/api/ollama/info')
+      const data = await res.json()
+      setOllamaInfo(data)
+      if (data.currentModel) {
+        setSelectedModel(data.currentModel)
+      }
+    } catch (error) {
+      console.error('Error loading Ollama info:', error)
+    }
+  }
+
+  const checkOllama = async () => {
+    try {
+      const res = await fetch('/api/ollama/status')
+      const data = await res.json()
+      setOllamaStatus(data.available)
+    } catch {
+      setOllamaStatus(false)
+    }
+  }
+
+  const loadData = async () => {
+    try {
+      const [categoriesRes, articlesRes] = await Promise.all([
+        fetch('/api/categories'),
+        fetch('/api/articles'),
+      ])
+      const categoriesData = await categoriesRes.json()
+      const articlesData = await articlesRes.json()
+      setCategories(categoriesData)
+      setArticles(articlesData)
+    } catch (error) {
+      console.error('Error loading data:', error)
+    }
+  }
+
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    try {
+      const res = await fetch('/api/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCategory),
+      })
+      if (res.ok) {
+        setNewCategory({ name: '', description: '', color: '#3B82F6' })
+        loadData()
+        alert('Categoría creada exitosamente')
+      }
+    } catch (error) {
+      alert('Error al crear categoría')
+    }
+    setLoading(false)
+  }
+
+  const handleGenerateArticle = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!generateForm.categoryId || !generateForm.topic) {
+      alert('Por favor completa todos los campos')
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await fetch('/api/articles/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(generateForm),
+      })
+      if (res.ok) {
+        setGenerateForm({ topic: '', categoryId: '', tone: 'informativo' })
+        loadData()
+        alert('Artículo generado exitosamente')
+      } else {
+        const error = await res.json()
+        alert(`Error: ${error.error}`)
+      }
+    } catch (error) {
+      alert('Error al generar artículo')
+    }
+    setLoading(false)
+  }
+
+  const togglePublish = async (id: string, published: boolean) => {
+    try {
+      await fetch(`/api/articles/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ published: !published }),
+      })
+      loadData()
+    } catch (error) {
+      alert('Error al actualizar artículo')
+    }
+  }
+
+  const toggleFeatured = async (id: string, featured: boolean) => {
+    try {
+      await fetch(`/api/articles/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ featured: !featured }),
+      })
+      loadData()
+    } catch (error) {
+      alert('Error al actualizar artículo')
+    }
+  }
+
+  const deleteArticle = async (id: string) => {
+    if (!confirm('¿Estás seguro de eliminar este artículo?')) return
+    try {
+      await fetch(`/api/articles/${id}`, { method: 'DELETE' })
+      loadData()
+    } catch (error) {
+      alert('Error al eliminar artículo')
+    }
+  }
+
+  const handleTestOllama = async () => {
+    if (!testPrompt.trim()) {
+      alert('Por favor escribe un prompt de prueba')
+      return
+    }
+    setTestLoading(true)
+    setTestResponse('')
+    try {
+      const res = await fetch('/api/ollama/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          prompt: testPrompt,
+          model: selectedModel 
+        }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setTestResponse(data.response)
+      } else {
+        setTestResponse(`Error: ${data.error}`)
+      }
+    } catch (error) {
+      setTestResponse('Error al conectar con Ollama')
+    } finally {
+      setTestLoading(false)
+    }
+  }
+
+  const handleLogout = async () => {
+    if (!confirm('¿Deseas cerrar sesión?')) return
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' })
+      router.push('/login')
+      router.refresh()
+    } catch (error) {
+      alert('Error al cerrar sesión')
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <header className="bg-white shadow">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+          <h1 className="text-2xl font-bold">Dashboard - IA NEWS</h1>
+          <div className="flex gap-3">
+            <Link href="/" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
+              Ver Sitio
+            </Link>
+            <button onClick={handleLogout} className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition">
+              Cerrar Sesión
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <div className={`mb-6 p-4 rounded ${ollamaStatus ? 'bg-green-100' : 'bg-red-100'}`}>
+          <p className="font-semibold">
+            Estado de Ollama: {ollamaStatus ? '✓ Conectado' : '✗ No disponible'}
+          </p>
+          {!ollamaStatus && (
+            <p className="text-sm mt-1">
+              Asegúrate de que Ollama esté corriendo en {process.env.NEXT_PUBLIC_OLLAMA_HOST || 'http://localhost:11434'}
+            </p>
+          )}
+        </div>
+
+        <div className="mb-6 flex gap-4 border-b">
+          <button 
+            onClick={() => setActiveTab('articles')} 
+            className={`px-4 py-2 font-semibold ${activeTab === 'articles' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'}`}
+          >
+            Artículos
+          </button>
+          <button 
+            onClick={() => setActiveTab('categories')} 
+            className={`px-4 py-2 font-semibold ${activeTab === 'categories' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'}`}
+          >
+            Categorías
+          </button>
+          <button 
+            onClick={() => setActiveTab('generate')} 
+            className={`px-4 py-2 font-semibold ${activeTab === 'generate' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'}`}
+          >
+            Generar con IA
+          </button>
+          <button 
+            onClick={() => setActiveTab('ollama')} 
+            className={`px-4 py-2 font-semibold ${activeTab === 'ollama' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'}`}
+          >
+            Configuración IA
+          </button>
+        </div>
+
+        {activeTab === 'articles' && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-xl font-bold mb-4">Artículos</h2>
+            <div className="space-y-4">
+              {articles.map((article) => (
+                <div key={article.id} className="border border-gray-200 rounded p-4 flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span 
+                        className="px-2 py-1 text-xs font-bold text-white rounded" 
+                        style={{ backgroundColor: article.category.color }}
+                      >
+                        {article.category.name}
+                      </span>
+                      {article.published && (
+                        <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded">
+                          Publicado
+                        </span>
+                      )}
+                      {article.featured && (
+                        <span className="px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded">
+                          Destacado
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="font-bold text-lg mb-1">{article.title}</h3>
+                    <p className="text-sm text-gray-600 mb-2">{article.summary}</p>
+                    <p className="text-xs text-gray-500">{article.viewCount} lecturas</p>
+                  </div>
+                  <div className="flex gap-2 ml-4">
+                    <button 
+                      onClick={() => togglePublish(article.id, article.published)} 
+                      className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                      {article.published ? 'Ocultar' : 'Publicar'}
+                    </button>
+                    <button 
+                      onClick={() => toggleFeatured(article.id, article.featured)} 
+                      className="px-3 py-1 text-sm bg-yellow-600 text-white rounded hover:bg-yellow-700"
+                    >
+                      {article.featured ? 'Quitar' : 'Destacar'}
+                    </button>
+                    <button 
+                      onClick={() => deleteArticle(article.id)} 
+                      className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+                    >
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {articles.length === 0 && (
+                <p className="text-gray-500 text-center py-8">
+                  No hay artículos. Genera algunos con IA.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'categories' && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-xl font-bold mb-4">Crear Nueva Categoría</h2>
+            <form onSubmit={handleCreateCategory} className="mb-8">
+              <div className="grid md:grid-cols-3 gap-4 mb-4">
+                <input 
+                  type="text" 
+                  placeholder="Nombre" 
+                  value={newCategory.name} 
+                  onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })} 
+                  className="px-4 py-2 border rounded" 
+                  required 
+                />
+                <input 
+                  type="text" 
+                  placeholder="Descripción" 
+                  value={newCategory.description} 
+                  onChange={(e) => setNewCategory({ ...newCategory, description: e.target.value })} 
+                  className="px-4 py-2 border rounded" 
+                />
+                <input 
+                  type="color" 
+                  value={newCategory.color} 
+                  onChange={(e) => setNewCategory({ ...newCategory, color: e.target.value })} 
+                  className="px-4 py-2 border rounded" 
+                />
+              </div>
+              <button 
+                type="submit" 
+                disabled={loading} 
+                className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
+              >
+                {loading ? 'Creando...' : 'Crear Categoría'}
+              </button>
+            </form>
+            <h2 className="text-xl font-bold mb-4">Categorías Existentes</h2>
+            <div className="grid md:grid-cols-2 gap-4">
+              {categories.map((cat) => (
+                <div key={cat.id} className="border border-gray-200 rounded p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-bold">{cat.name}</h3>
+                    <span className="w-8 h-8 rounded" style={{ backgroundColor: cat.color }} />
+                  </div>
+                  {cat.description && <p className="text-sm text-gray-600">{cat.description}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'generate' && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-xl font-bold mb-4">Generar Artículo con IA</h2>
+            <form onSubmit={handleGenerateArticle}>
+              <div className="space-y-4 mb-4">
+                <div>
+                  <label className="block font-semibold mb-2">Tema del artículo</label>
+                  <input 
+                    type="text" 
+                    placeholder="Ej: Avances en inteligencia artificial" 
+                    value={generateForm.topic} 
+                    onChange={(e) => setGenerateForm({ ...generateForm, topic: e.target.value })} 
+                    className="w-full px-4 py-2 border rounded" 
+                    required 
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-2">Categoría</label>
+                  <select 
+                    value={generateForm.categoryId} 
+                    onChange={(e) => setGenerateForm({ ...generateForm, categoryId: e.target.value })} 
+                    className="w-full px-4 py-2 border rounded" 
+                    required
+                  >
+                    <option value="">Selecciona una categoría</option>
+                    {categories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-2">Tono</label>
+                  <select 
+                    value={generateForm.tone} 
+                    onChange={(e) => setGenerateForm({ ...generateForm, tone: e.target.value })} 
+                    className="w-full px-4 py-2 border rounded"
+                  >
+                    <option value="informativo">Informativo</option>
+                    <option value="formal">Formal</option>
+                    <option value="casual">Casual</option>
+                    <option value="técnico">Técnico</option>
+                  </select>
+                </div>
+              </div>
+              <button 
+                type="submit" 
+                disabled={loading || !ollamaStatus} 
+                className="px-6 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-400"
+              >
+                {loading ? 'Generando...' : 'Generar Artículo'}
+              </button>
+              {!ollamaStatus && (
+                <p className="text-red-600 text-sm mt-2">
+                  Ollama no está disponible. Verifica la conexión.
+                </p>
+              )}
+            </form>
+          </div>
+        )}
+
+        {activeTab === 'ollama' && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-xl font-bold mb-4">Configuración de Ollama</h2>
+            <div className={`mb-6 p-4 rounded ${ollamaStatus ? 'bg-green-50 border-2 border-green-500' : 'bg-red-50 border-2 border-red-500'}`}>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-bold text-lg">
+                  {ollamaStatus ? '✓ Conectado' : '✗ Desconectado'}
+                </h3>
+                <button 
+                  onClick={() => { checkOllama(); loadOllamaInfo(); }} 
+                  className="px-3 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 text-sm font-semibold"
+                >
+                  🔄 Recargar
+                </button>
+              </div>
+              {ollamaInfo && (
+                <div className="text-sm space-y-1">
+                  <p><strong>Host:</strong> {ollamaInfo.host}</p>
+                  {ollamaInfo.currentModel && (
+                    <p><strong>Modelo configurado:</strong> {ollamaInfo.currentModel}</p>
+                  )}
+                  {!ollamaStatus && (
+                    <p className="text-red-700 mt-2">
+                      Asegúrate de que Ollama esté corriendo con: <code className="bg-red-100 px-2 py-1 rounded">ollama serve</code>
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+            {ollamaInfo?.models && ollamaInfo.models.length > 0 && (
+              <div className="mb-6">
+                <h3 className="font-bold mb-3">Modelos Disponibles</h3>
+                <div className="grid md:grid-cols-2 gap-3">
+                  {ollamaInfo.models.map((model: any) => (
+                    <div 
+                      key={model.name} 
+                      className={`border rounded p-3 cursor-pointer transition ${selectedModel === model.name ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-300'}`} 
+                      onClick={() => setSelectedModel(model.name)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold">{model.name}</p>
+                          <p className="text-xs text-gray-600">
+                            {(model.size / 1024 / 1024 / 1024).toFixed(2)} GB
+                          </p>
+                        </div>
+                        {selectedModel === model.name && (
+                          <span className="text-blue-600 text-xl">✓</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-600 mt-2">
+                  Haz clic en un modelo para seleccionarlo para las pruebas. El modelo en producción se configura en el archivo .env
+                </p>
+              </div>
+            )}
+            <div className="border-t pt-6">
+              <h3 className="font-bold mb-3">Probar Generación</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block font-semibold mb-2">Modelo a probar</label>
+                  <select 
+                    value={selectedModel} 
+                    onChange={(e) => setSelectedModel(e.target.value)} 
+                    className="w-full px-4 py-2 border rounded" 
+                    disabled={!ollamaInfo?.models || ollamaInfo.models.length === 0}
+                  >
+                    {ollamaInfo?.models?.length > 0 ? (
+                      ollamaInfo.models.map((model: any) => (
+                        <option key={model.name} value={model.name}>{model.name}</option>
+                      ))
+                    ) : (
+                      <option>No hay modelos disponibles</option>
+                    )}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-2">Prompt de prueba</label>
+                  <textarea 
+                    value={testPrompt} 
+                    onChange={(e) => setTestPrompt(e.target.value)} 
+                    className="w-full px-4 py-3 border rounded h-24 resize-none" 
+                    placeholder="Escribe un prompt para probar..." 
+                  />
+                </div>
+                <button 
+                  onClick={handleTestOllama} 
+                  disabled={testLoading || !ollamaStatus} 
+                  className="px-6 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-400"
+                >
+                  {testLoading ? '⏳ Generando...' : '🚀 Probar Generación'}
+                </button>
+                {testResponse && (
+                  <div className="mt-4 p-4 bg-gray-50 border rounded">
+                    <p className="font-semibold mb-2">Respuesta:</p>
+                    <p className="text-sm whitespace-pre-line">{testResponse}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded">
+              <h4 className="font-bold mb-2">💡 Instrucciones</h4>
+              <ul className="text-sm space-y-1 list-disc list-inside">
+                <li>Asegúrate de tener Ollama instalado y corriendo: <code className="bg-white px-2 py-0.5 rounded">ollama serve</code></li>
+                <li>Descarga modelos con: <code className="bg-white px-2 py-0.5 rounded">ollama pull llama2</code></li>
+                <li>Modelos recomendados: llama2, mistral, codellama, gemma</li>
+                <li>Para cambiar el modelo en producción, edita OLLAMA_MODEL en el archivo .env</li>
+              </ul>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
